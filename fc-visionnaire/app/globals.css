@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-base: #09090b; /* Fond principal très sombre (zinc-950) */
+  --color-bg-panel: #18181b; /* Fond des cartes (zinc-900) */
+  --color-border-subtle: #27272a; /* Bordures discrètes (zinc-800) */
+  --color-text-base: #fafafa; /* Texte principal blanc (zinc-50) */
+  --color-text-muted: #a1a1aa; /* Texte secondaire (zinc-400) */
+  --color-accent-main: #3b82f6; /* Un bleu moderne et clair */
+  --color-accent-danger: #ef4444; /* Rouge pur pour les alertes */
+}
