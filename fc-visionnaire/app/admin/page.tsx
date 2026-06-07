@@ -121,7 +121,7 @@ export default async function AdminPage(props: PageProps) {
               </button>
             </form>
             <p className="text-[10px] text-text-muted text-center max-w-[140px]">
-              Auto après chaque action admin + toutes les heures
+              Auto après chaque action admin + 1×/jour (cron)
             </p>
 
             <div className="surface-2 p-3 text-sm text-text-muted max-w-xs">

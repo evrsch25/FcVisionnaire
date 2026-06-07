@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
-/** Recalcul horaire (Vercel Cron) + filet de sécurité. */
+/** Recalcul quotidien (Vercel Cron Hobby) + filet de sécurité. */
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const secret = process.env.CRON_SECRET;
