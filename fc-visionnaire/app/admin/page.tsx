@@ -25,12 +25,15 @@ import {
   nextPhase,
   type Phase,
 } from "@/lib/tournament/phases";
+import { requireAdminSession, logoutAdmin } from "@/app/actions/adminAuth";
 
 type PageProps = {
   searchParams: Promise<{ [key: string]: string | undefined }>;
 };
 
 export default async function AdminPage(props: PageProps) {
+  await requireAdminSession();
+
   const searchParams = await props.searchParams;
   const sortBy = searchParams.sort || "date";
 
@@ -115,6 +118,11 @@ export default async function AdminPage(props: PageProps) {
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-3">
+            <form action={logoutAdmin}>
+              <button type="submit" className="btn-ghost btn-sm">
+                Déconnexion admin
+              </button>
+            </form>
             <form action={recalculateAll}>
               <button type="submit" className="btn-secondary">
                 Forcer le recalcul

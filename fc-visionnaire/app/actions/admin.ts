@@ -13,6 +13,7 @@ import {
   DISTINCTION_CATEGORIES,
   type RealDistinctions,
 } from "@/lib/tournament/distinctions";
+import { requireAdminSession } from "@/app/actions/adminAuth";
 
 async function afterAdminMutation() {
   await recalculateScores();
@@ -24,6 +25,7 @@ async function afterAdminMutation() {
 
 // 1. Ajouter un nouveau match
 export async function addMatch(formData: FormData) {
+  await requireAdminSession();
   const stage = formData.get("stage") as string;
   const teamHome = formData.get("team_home") as string;
   const teamAway = formData.get("team_away") as string;
@@ -46,6 +48,7 @@ export async function addMatch(formData: FormData) {
 
 // 2. Mettre à jour le score réel d'un match terminé
 export async function updateRealScore(formData: FormData) {
+  await requireAdminSession();
   const matchId = formData.get("match_id") as string;
   const scoreHome = formData.get("score_home") as string;
   const scoreAway = formData.get("score_away") as string;
@@ -84,6 +87,7 @@ export async function updateRealScore(formData: FormData) {
 
 // 3b. Clôturer le tour courant et générer le suivant
 export async function advancePhase() {
+  await requireAdminSession();
   const { data: settings } = await supabase
     .from("app_settings")
     .select("current_phase, is_locked")
@@ -144,11 +148,13 @@ export async function advancePhase() {
 
 /** Recalcul manuel (les mutations admin le déclenchent déjà automatiquement). */
 export async function recalculateAll() {
+  await requireAdminSession();
   await afterAdminMutation();
 }
 
 /** Vainqueurs réels des distinctions (saisis par l'admin après la compétition). */
 export async function updateRealDistinctions(formData: FormData) {
+  await requireAdminSession();
   const real: RealDistinctions = {};
 
   for (const cat of DISTINCTION_CATEGORIES) {
@@ -166,6 +172,7 @@ export async function updateRealDistinctions(formData: FormData) {
 
 // 5. Générer les 6 matchs d'un Groupe ou les mettre à jour
 export async function generateGroup(formData: FormData) {
+  await requireAdminSession();
   const groupName = formData.get("group_name") as string;
   if (!groupName) return;
 
@@ -283,6 +290,7 @@ export async function generateGroup(formData: FormData) {
 
 // 6. Générer l'Arbre Final (avec des champs vides pour activer les placeholders)
 export async function generateKnockouts() {
+  await requireAdminSession();
   // Sécurité anti-doublon : on vérifie si la Finale existe déjà
   const { data: existing } = await supabase
     .from("matches")
@@ -351,6 +359,7 @@ export async function generateKnockouts() {
 
 // 7. Mettre à jour les infos d'un match (Équipes et Date)
 export async function updateMatchInfo(formData: FormData) {
+  await requireAdminSession();
   const matchId = formData.get("match_id") as string;
   const teamHome = formData.get("team_home") as string;
   const teamAway = formData.get("team_away") as string;
@@ -375,6 +384,7 @@ export async function updateMatchInfo(formData: FormData) {
 
 // 8. Supprimer un match spécifique
 export async function deleteMatch(formData: FormData) {
+  await requireAdminSession();
   const matchId = formData.get("match_id") as string;
   if (!matchId) return;
 
@@ -385,6 +395,7 @@ export async function deleteMatch(formData: FormData) {
 
 // 9. Supprimer TOUS les matchs (Bouton d'urgence)
 export async function deleteAllMatches() {
+  await requireAdminSession();
   await supabase
     .from("matches")
     .delete()
