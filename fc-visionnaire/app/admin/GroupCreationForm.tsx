@@ -36,16 +36,19 @@ export default function GroupCreationForm({
   };
 
   return (
-    <div className="bg-bg-panel p-6 rounded-xl border border-border-subtle">
-      <h2 className="text-xl font-bold text-text-base uppercase tracking-wider mb-4">
-        1. Créer ou Mettre à jour un Groupe
-      </h2>
+    <div className="surface p-6">
+      <div className="flex items-center gap-3 mb-5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-main/15 text-accent-soft font-display font-bold">
+          1
+        </span>
+        <h2 className="section-title">Créer ou Mettre à jour un Groupe</h2>
+      </div>
       <form action={generateGroup} className="flex flex-col gap-3">
         <select
           name="group_name"
           value={selectedGroup}
           onChange={(e) => setSelectedGroup(e.target.value)}
-          className="bg-bg-base text-text-base border border-border-subtle rounded p-3 outline-none focus:border-accent-main"
+          className="input-field"
           required
         >
           <option value="">Sélectionner un Groupe...</option>
@@ -71,15 +74,12 @@ export default function GroupCreationForm({
                 value={teams[index] || ""}
                 onChange={(e) => handleTeamChange(index, e.target.value)}
                 required
-                className="w-full bg-bg-base text-text-base border border-border-subtle rounded p-3 outline-none focus:border-accent-main"
+                className="input-field"
               />
             </div>
           ))}
         </div>
-        <button
-          type="submit"
-          className="bg-text-base text-bg-base font-black py-3 rounded uppercase hover:bg-gray-200 transition-colors mt-2 tracking-wider"
-        >
+        <button type="submit" className="btn-primary w-full mt-2">
           Générer / Mettre à jour
         </button>
       </form>

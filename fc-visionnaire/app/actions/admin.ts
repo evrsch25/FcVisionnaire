@@ -2,6 +2,25 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import {
+  generateNextRoundMatches,
+  currentPhaseComplete,
+  type DbMatch,
+} from "@/lib/tournament/realBracket";
+import { nextPhase, type Phase } from "@/lib/tournament/phases";
+import { recalculateScores } from "@/lib/scoring/recalculate";
+import {
+  DISTINCTION_CATEGORIES,
+  type RealDistinctions,
+} from "@/lib/tournament/distinctions";
+
+async function afterAdminMutation() {
+  await recalculateScores();
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/leaderboard");
+  revalidatePath("/bracket");
+}
 
 // 1. Ajouter un nouveau match
 export async function addMatch(formData: FormData) {
@@ -22,179 +41,127 @@ export async function addMatch(formData: FormData) {
     },
   ]);
 
-  revalidatePath("/admin");
-  revalidatePath("/dashboard");
+  await afterAdminMutation();
 }
 
-// 2. Verrouiller / Déverrouiller la compétition
-export async function toggleLock() {
-  // On récupère le statut actuel
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("is_locked")
-    .eq("id", 1)
-    .single();
-
-  if (settings) {
-    // On inverse le statut
-    await supabase
-      .from("app_settings")
-      .update({ is_locked: !settings.is_locked })
-      .eq("id", 1);
-  }
-
-  revalidatePath("/admin");
-}
-
-// 3. Mettre à jour le score réel d'un match terminé
+// 2. Mettre à jour le score réel d'un match terminé
 export async function updateRealScore(formData: FormData) {
   const matchId = formData.get("match_id") as string;
   const scoreHome = formData.get("score_home") as string;
   const scoreAway = formData.get("score_away") as string;
+  const realWinner = (formData.get("real_winner") as string) || null;
 
-  if (!matchId || !scoreHome || !scoreAway) return;
+  if (!matchId || scoreHome === "" || scoreAway === "") return;
+
+  const sh = parseInt(scoreHome, 10);
+  const sa = parseInt(scoreAway, 10);
+
+  const { data: match } = await supabase
+    .from("matches")
+    .select("team_home, team_away, slot")
+    .eq("id", matchId)
+    .single();
+
+  let winner: string | null = null;
+  if (match?.slot) {
+    if (sh > sa) winner = match.team_home;
+    else if (sa > sh) winner = match.team_away;
+    else winner = realWinner;
+  }
 
   await supabase
     .from("matches")
     .update({
-      real_score_home: parseInt(scoreHome),
-      real_score_away: parseInt(scoreAway),
+      real_score_home: sh,
+      real_score_away: sa,
+      real_winner: winner,
       status: "Completed",
     })
     .eq("id", matchId);
 
-  revalidatePath("/admin");
+  await afterAdminMutation();
 }
 
-// 4. LE MOTEUR DE CALCUL (À ajouter à la fin de app/actions/admin.ts)
-export async function recalculateAll() {
-  // 1. Récupérer toutes les données nécessaires
-  const { data: users } = await supabase.from("users").select("*");
-  const { data: matches } = await supabase
-    .from("matches")
-    .select("*")
-    .eq("status", "Completed");
-  const { data: predictions } = await supabase.from("predictions").select("*");
-  const { data: oldBadges } = await supabase.from("badges").select("*");
+// 3b. Clôturer le tour courant et générer le suivant
+export async function advancePhase() {
+  const { data: settings } = await supabase
+    .from("app_settings")
+    .select("current_phase, is_locked")
+    .eq("id", 1)
+    .single();
 
-  if (!users || !matches || !predictions) return;
+  const phase = (settings?.current_phase ?? "GROUPS") as Phase;
+  const following = nextPhase(phase);
+  if (!following) return;
 
-  // On va préparer les mises à jour en mémoire pour aller plus vite
-  const userUpdates = [];
-  const newBadges: any[] = [];
+  const { data: allMatches } = await supabase.from("matches").select("*");
+  const matches = (allMatches ?? []) as DbMatch[];
 
-  // 2. Boucle sur chaque utilisateur
-  for (const user of users) {
-    let totalPoints = 0;
-    let exactScoresCount = 0;
-    let hasGirouette = false;
-    let hasVisionnaire = false;
+  const check = currentPhaseComplete(phase, matches);
+  if (!check.complete) return;
 
-    // A. Calcul des points pour les Matchs
-    const userPronos = predictions.filter((p) => p.user_id === user.id);
-
-    for (const prono of userPronos) {
-      const match = matches.find((m) => m.id === prono.match_id);
-      if (!match) continue; // Match pas encore terminé
-
-      let pointsEarned = 0;
-      const isGirouette = prono.is_girouette;
-
-      if (isGirouette) hasGirouette = true;
-
-      const realHome = match.real_score_home!;
-      const realAway = match.real_score_away!;
-      const predHome = prono.predicted_score_home;
-      const predAway = prono.predicted_score_away;
-
-      // Logique des points (Score exact = 4, Bonne issue = 2)
-      if (realHome === predHome && realAway === predAway) {
-        pointsEarned = isGirouette ? 2 : 4;
-        exactScoresCount++;
-        // Badge Visionnaire (Score exact avec 4 buts ou plus au total)
-        if (realHome + realAway >= 4) hasVisionnaire = true;
-      } else if (
-        Math.sign(realHome - realAway) === Math.sign(predHome - predAway)
-      ) {
-        pointsEarned = isGirouette ? 1 : 2;
-      }
-
-      totalPoints += pointsEarned;
-
-      // Mise à jour du prono en base pour l'historique
-      await supabase
-        .from("predictions")
-        .update({ points_earned: pointsEarned })
-        .eq("id", prono.id);
-    }
-
-    // B. Attribution des Badges "Positifs" ou liés aux actions
-    if (hasGirouette)
-      newBadges.push({ user_id: user.id, badge_name: "La Girouette 🌪️" });
-    if (hasVisionnaire)
-      newBadges.push({ user_id: user.id, badge_name: "Le Visionnaire 👁️" });
-    if (exactScoresCount >= 2)
-      newBadges.push({ user_id: user.id, badge_name: "Le Sniper 🎯" });
-    if (userPronos.length >= 3 && totalPoints === 0)
-      newBadges.push({ user_id: user.id, badge_name: "Le Chat Noir 🐈‍⬛" });
-
-    userUpdates.push({
-      ...user,
-      total_points: totalPoints,
-      old_rank: user.rank, // On garde l'ancien rang en mémoire temporaire pour le Parachute
-    });
-  }
-
-  // 3. Tri des utilisateurs pour définir le nouveau Classement (Rang)
-  userUpdates.sort((a, b) => b.total_points - a.total_points);
-
-  // 4. Attribution des Rangs et Badges de Classement
-  for (let i = 0; i < userUpdates.length; i++) {
-    const newRank = i + 1;
-    const user = userUpdates[i];
-
-    // Le Touriste (Dernier du classement)
-    if (newRank === userUpdates.length && userUpdates.length > 1) {
-      newBadges.push({ user_id: user.id, badge_name: "Le Touriste 🩴" });
-    }
-
-    // Le Parachute (A perdu 3 places ou plus)
-    if (user.old_rank !== 0 && newRank - user.old_rank >= 3) {
-      newBadges.push({ user_id: user.id, badge_name: "Le Parachute 🪂" });
-    }
-
-    // Sauvegarde du nouveau rang et des points
+  if (phase === "FINAL") {
     await supabase
-      .from("users")
-      .update({
-        total_points: user.total_points,
-        rank: newRank,
-      })
-      .eq("id", user.id);
+      .from("app_settings")
+      .update({ current_phase: "DONE", is_locked: true })
+      .eq("id", 1);
+    await afterAdminMutation();
+    return;
   }
 
-  // 5. Nettoyage et insertion des nouveaux badges
-  // On efface tous les anciens badges pour ne garder que ceux du recalcul actuel
+  const { matches: generated, errors } = generateNextRoundMatches(
+    phase,
+    matches,
+  );
+  if (errors.length > 0) return;
+
+  const existingSlots = new Set(
+    matches.filter((m) => m.slot).map((m) => m.slot),
+  );
+
+  const toInsert = generated
+    .filter((g) => !existingSlots.has(g.slot))
+    .map((g) => ({
+      stage: g.stage,
+      team_home: g.team_home,
+      team_away: g.team_away,
+      slot: g.slot,
+      match_date: g.match_date,
+      status: "Pending",
+    }));
+
+  if (toInsert.length > 0) {
+    await supabase.from("matches").insert(toInsert);
+  }
+
   await supabase
-    .from("badges")
-    .delete()
-    .neq("id", "00000000-0000-0000-0000-000000000000"); // Hack pour tout supprimer facilement sans bloquer
-  if (newBadges.length > 0) {
-    // Éviter les doublons de badges pour un même utilisateur
-    const uniqueBadges = newBadges.filter(
-      (badge, index, self) =>
-        index ===
-        self.findIndex(
-          (t) =>
-            t.user_id === badge.user_id && t.badge_name === badge.badge_name,
-        ),
-    );
-    await supabase.from("badges").insert(uniqueBadges);
+    .from("app_settings")
+    .update({ current_phase: following, is_locked: false })
+    .eq("id", 1);
+
+  await afterAdminMutation();
+}
+
+/** Recalcul manuel (les mutations admin le déclenchent déjà automatiquement). */
+export async function recalculateAll() {
+  await afterAdminMutation();
+}
+
+/** Vainqueurs réels des distinctions (saisis par l'admin après la compétition). */
+export async function updateRealDistinctions(formData: FormData) {
+  const real: RealDistinctions = {};
+
+  for (const cat of DISTINCTION_CATEGORIES) {
+    const val = (formData.get(cat.id) as string)?.trim();
+    if (val) real[cat.id] = val;
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/dashboard");
-  revalidatePath("/leaderboard");
+  await supabase
+    .from("app_settings")
+    .update({ real_distinctions: real })
+    .eq("id", 1);
+
+  await afterAdminMutation();
 }
 
 // 5. Générer les 6 matchs d'un Groupe ou les mettre à jour
@@ -311,7 +278,7 @@ export async function generateGroup(formData: FormData) {
     await supabase.from("matches").insert(groupMatches);
   }
 
-  revalidatePath("/admin");
+  await afterAdminMutation();
 }
 
 // 6. Générer l'Arbre Final (avec des champs vides pour activer les placeholders)
@@ -379,7 +346,7 @@ export async function generateKnockouts() {
   });
 
   await supabase.from("matches").insert(matchesToInsert);
-  revalidatePath("/admin");
+  await afterAdminMutation();
 }
 
 // 7. Mettre à jour les infos d'un match (Équipes et Date)
@@ -403,8 +370,7 @@ export async function updateMatchInfo(formData: FormData) {
     })
     .eq("id", matchId);
 
-  revalidatePath("/admin");
-  revalidatePath("/bracket");
+  await afterAdminMutation();
 }
 
 // 8. Supprimer un match spécifique
@@ -414,7 +380,7 @@ export async function deleteMatch(formData: FormData) {
 
   await supabase.from("matches").delete().eq("id", matchId);
 
-  revalidatePath("/admin");
+  await afterAdminMutation();
 }
 
 // 9. Supprimer TOUS les matchs (Bouton d'urgence)
@@ -424,5 +390,5 @@ export async function deleteAllMatches() {
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000"); // Hack pour tout supprimer facilement
 
-  revalidatePath("/admin");
+  await afterAdminMutation();
 }

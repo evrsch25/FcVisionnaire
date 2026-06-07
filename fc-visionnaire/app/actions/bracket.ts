@@ -3,107 +3,150 @@
 import { supabase } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import type {
+  SavePredictionsPayload,
+  SaveDistinctionsPayload,
+} from "./bracketTypes";
+import type { Phase } from "@/lib/tournament/phases";
+import {
+  getPhaseKickoff,
+  isKickoffPassed,
+  isCompetitionStarted,
+  matchBelongsToPhase,
+} from "@/lib/tournament/phaseLock";
 
-export async function saveBracket(formData: FormData) {
+async function getUserId() {
   const cookieStore = await cookies();
-  const userId = cookieStore.get("user_id")?.value;
+  return cookieStore.get("user_id")?.value;
+}
 
-  if (!userId) return { error: "Non autorisé" };
-
-  // 1. Vérifier si la compétition est verrouillée (Statut Girouette)
-  const { data: settings } = await supabase
+async function getSettings() {
+  const { data } = await supabase
     .from("app_settings")
-    .select("is_locked")
+    .select("current_phase")
     .eq("id", 1)
     .single();
-  const isLocked = settings?.is_locked || false;
+  return {
+    currentPhase: (data?.current_phase ?? "GROUPS") as Phase,
+  };
+}
 
-  // 2. Parcourir toutes les données envoyées par le formulaire
-  const matchUpdates = [];
-  const distinctionUpdates = [];
+/** Pronos du tour courant — modifiables après kickoff avec demi-points (girouette). */
+export async function savePredictions(payload: SavePredictionsPayload) {
+  const userId = await getUserId();
+  if (!userId) return { error: "Non autorisé" };
 
-  for (const [key, value] of formData.entries()) {
-    const valStr = value.toString().trim();
-    if (!valStr) continue;
+  const { currentPhase } = await getSettings();
+  if (currentPhase === "DONE") {
+    return { error: "Le tournoi est terminé." };
+  }
 
-    // --- SAUVEGARDE DES MATCHS ---
-    if (key.startsWith("matchHome_")) {
-      const matchId = key.split("_")[1];
-      const scoreHome = parseInt(valStr);
-      const scoreAway = parseInt(
-        formData.get(`matchAway_${matchId}`) as string,
-      );
+  const { data: allMatches } = await supabase
+    .from("matches")
+    .select("id, stage, slot, match_date")
+    .order("match_date", { ascending: true });
 
-      if (!isNaN(scoreHome) && !isNaN(scoreAway)) {
-        // Vérifier s'il y a déjà un prono pour savoir si on le modifie après verrouillage
-        const { data: existing } = await supabase
-          .from("predictions")
-          .select("predicted_score_home, predicted_score_away, is_girouette")
-          .eq("user_id", userId)
-          .eq("match_id", matchId)
-          .single();
+  const matches = allMatches ?? [];
+  const matchById = Object.fromEntries(matches.map((m) => [m.id, m]));
+  const now = new Date();
 
-        let girouette = existing?.is_girouette || false;
-        // Si c'est verrouillé ET que c'est une modification (ou un nouveau prono tardif), on le marque en Girouette
-        if (isLocked) {
-          if (
-            !existing ||
-            existing.predicted_score_home !== scoreHome ||
-            existing.predicted_score_away !== scoreAway
-          ) {
-            girouette = true;
-          }
-        }
+  const updates: {
+    user_id: string;
+    match_id: string;
+    predicted_score_home: number;
+    predicted_score_away: number;
+    is_girouette: boolean;
+  }[] = [];
 
-        matchUpdates.push({
-          user_id: userId,
-          match_id: matchId,
-          predicted_score_home: scoreHome,
-          predicted_score_away: scoreAway,
-          is_girouette: girouette,
-        });
-      }
-    }
+  for (const s of payload.scores) {
+    if (Number.isNaN(s.score_home) || Number.isNaN(s.score_away)) continue;
 
-    // --- SAUVEGARDE DES DISTINCTIONS ---
-    if (key.startsWith("distinction_")) {
-      const category = key.replace("distinction_", "");
+    const match = matchById[s.match_id];
+    if (!match || !matchBelongsToPhase(match, currentPhase)) continue;
 
+    const kickoff = getPhaseKickoff(currentPhase, matches);
+    const pastKickoff = isKickoffPassed(kickoff, now);
+
+    let girouette = false;
+    if (pastKickoff) {
       const { data: existing } = await supabase
-        .from("distinctions")
-        .select("player_name, is_girouette")
+        .from("predictions")
+        .select("predicted_score_home, predicted_score_away, is_girouette")
         .eq("user_id", userId)
-        .eq("category", category)
+        .eq("match_id", s.match_id)
         .single();
 
-      let girouette = existing?.is_girouette || false;
-      if (isLocked && (!existing || existing.player_name !== valStr)) {
-        girouette = true;
-      }
+      const isNew = !existing;
+      const isChanged =
+        existing &&
+        (existing.predicted_score_home !== s.score_home ||
+          existing.predicted_score_away !== s.score_away);
 
-      distinctionUpdates.push({
-        user_id: userId,
-        category: category,
-        player_name: valStr,
-        is_girouette: girouette,
-      });
+      if (isNew || isChanged) {
+        girouette = true;
+      } else {
+        girouette = existing?.is_girouette ?? false;
+      }
     }
+
+    updates.push({
+      user_id: userId,
+      match_id: s.match_id,
+      predicted_score_home: s.score_home,
+      predicted_score_away: s.score_away,
+      is_girouette: girouette,
+    });
   }
 
-  // 3. Envoyer en base de données (Upsert = Insère ou Met à jour si ça existe déjà)
-  if (matchUpdates.length > 0) {
+  if (updates.length > 0) {
     await supabase
       .from("predictions")
-      .upsert(matchUpdates, { onConflict: "user_id, match_id" });
+      .upsert(updates, { onConflict: "user_id, match_id" });
   }
-  if (distinctionUpdates.length > 0) {
-    await supabase
-      .from("distinctions")
-      .upsert(distinctionUpdates, { onConflict: "user_id, category" });
-  }
-
-  // (Note: L'arbre de tournoi complet nécessiterait un traitement similaire, on le simplifiera dans l'UI)
 
   revalidatePath("/bracket");
   revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/** Distinctions : modifiables uniquement avant le coup d'envoi (1er match de groupes). */
+export async function saveDistinctions(payload: SaveDistinctionsPayload) {
+  const userId = await getUserId();
+  if (!userId) return { error: "Non autorisé" };
+
+  const { data: matches } = await supabase
+    .from("matches")
+    .select("stage, slot, match_date");
+
+  if (isCompetitionStarted(matches ?? [])) {
+    return { error: "Les distinctions sont verrouillées (compétition démarrée)." };
+  }
+
+  const rows: {
+    user_id: string;
+    category: string;
+    player_name: string;
+    is_girouette: boolean;
+  }[] = [];
+
+  for (const d of payload.distinctions) {
+    const val = (d.player_name || "").trim();
+    if (!val) continue;
+    rows.push({
+      user_id: userId,
+      category: d.category,
+      player_name: val,
+      is_girouette: false,
+    });
+  }
+
+  if (rows.length > 0) {
+    await supabase
+      .from("distinctions")
+      .upsert(rows, { onConflict: "user_id, category" });
+  }
+
+  revalidatePath("/bracket");
+  revalidatePath("/dashboard");
+  return { ok: true };
 }

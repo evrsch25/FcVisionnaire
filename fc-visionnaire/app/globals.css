@@ -1,11 +1,175 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-base: #09090b; /* Fond principal très sombre (zinc-950) */
-  --color-bg-panel: #18181b; /* Fond des cartes (zinc-900) */
-  --color-border-subtle: #27272a; /* Bordures discrètes (zinc-800) */
-  --color-text-base: #fafafa; /* Texte principal blanc (zinc-50) */
-  --color-text-muted: #a1a1aa; /* Texte secondaire (zinc-400) */
-  --color-accent-main: #3b82f6; /* Un bleu moderne et clair */
-  --color-accent-danger: #ef4444; /* Rouge pur pour les alertes */
+  --font-display: var(--font-display), "Geist", system-ui, sans-serif;
+
+  /* Surfaces */
+  --color-bg-base: #08090d; /* Fond principal, noir bleuté profond */
+  --color-bg-panel: #121419; /* Cartes / panneaux */
+  --color-bg-elevated: #1a1d25; /* Eléments surélevés (inputs, chips) */
+
+  /* Bordures */
+  --color-border-subtle: #242833; /* Bordures discrètes */
+  --color-border-strong: #363b49; /* Bordures au survol / actives */
+
+  /* Texte */
+  --color-text-base: #f4f6f8; /* Texte principal */
+  --color-text-muted: #97a0ad; /* Texte secondaire */
+
+  /* Accent principal : vert "terrain" */
+  --color-accent-main: #10b981;
+  --color-accent-soft: #34d399;
+  --color-accent-deep: #047857;
+
+  /* Accent prestige : or "trophée" */
+  --color-gold: #f5b417;
+  --color-gold-soft: #fcd34d;
+
+  /* Alerte */
+  --color-accent-danger: #f43f5e;
+
+  /* Ombres lumineuses */
+  --shadow-glow: 0 0 0 1px rgba(16, 185, 129, 0.15), 0 18px 40px -18px rgba(16, 185, 129, 0.45);
+  --shadow-gold: 0 0 0 1px rgba(245, 180, 23, 0.2), 0 18px 40px -18px rgba(245, 180, 23, 0.5);
+  --shadow-soft: 0 12px 32px -16px rgba(0, 0, 0, 0.8);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-bg-base);
+    color: var(--color-text-base);
+    background-image:
+      radial-gradient(60rem 40rem at 12% -10%, rgba(16, 185, 129, 0.14), transparent 60%),
+      radial-gradient(50rem 36rem at 100% 0%, rgba(245, 180, 23, 0.08), transparent 55%),
+      radial-gradient(70rem 50rem at 50% 120%, rgba(16, 185, 129, 0.06), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgba(16, 185, 129, 0.3);
+    color: #fff;
+  }
+
+  /* Scrollbar discrète */
+  * {
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  /* Retire les flèches des inputs number pour un rendu plus net */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
+@layer components {
+  /* ---------- Surfaces ---------- */
+  .surface {
+    @apply bg-bg-panel/80 border border-border-subtle rounded-2xl backdrop-blur-sm;
+  }
+  .surface-2 {
+    @apply bg-bg-elevated border border-border-subtle rounded-xl;
+  }
+  .card-interactive {
+    @apply transition duration-200 ease-out hover:border-border-strong hover:-translate-y-0.5;
+  }
+
+  /* ---------- Boutons ---------- */
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger,
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 font-bold uppercase tracking-wider rounded-xl px-6 py-3 transition duration-200 ease-out cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none;
+  }
+  .btn-primary {
+    @apply font-black text-[#04130d];
+    background-image: linear-gradient(135deg, var(--color-accent-soft), var(--color-accent-deep));
+    box-shadow: var(--shadow-glow);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+  }
+  .btn-gold {
+    @apply font-black text-[#1a1203];
+    background-image: linear-gradient(135deg, var(--color-gold-soft), var(--color-gold));
+    box-shadow: var(--shadow-gold);
+  }
+  .btn-gold:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+  .btn-secondary {
+    @apply bg-bg-elevated border border-border-subtle text-text-base hover:border-border-strong hover:bg-bg-panel;
+  }
+  .btn-ghost {
+    @apply bg-transparent border border-border-subtle text-text-muted hover:text-text-base hover:border-border-strong;
+  }
+  .btn-danger {
+    @apply text-accent-danger bg-transparent border border-[color:rgba(244,63,94,0.25)] hover:bg-accent-danger hover:text-white;
+  }
+  .btn-sm {
+    @apply px-4 py-2 text-xs rounded-lg;
+  }
+
+  /* ---------- Formulaires ---------- */
+  .input-field {
+    @apply w-full bg-bg-elevated text-text-base border border-border-subtle rounded-xl px-4 py-3 outline-none transition placeholder:text-text-muted/60 focus:border-accent-main focus:ring-2 focus:ring-[color:rgba(16,185,129,0.25)];
+  }
+  .label-field {
+    @apply block text-xs font-bold uppercase tracking-wider text-text-muted mb-2;
+  }
+
+  /* ---------- Divers ---------- */
+  .chip {
+    @apply inline-flex items-center bg-bg-elevated border border-border-subtle text-text-muted text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full;
+  }
+  .chip-gold {
+    @apply inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full;
+    color: var(--color-gold-soft);
+    background: rgba(245, 180, 23, 0.1);
+    border: 1px solid rgba(245, 180, 23, 0.25);
+  }
+  .section-title {
+    @apply text-xl md:text-2xl font-black uppercase tracking-widest text-text-base;
+  }
+  .eyebrow {
+    @apply text-[11px] font-bold uppercase tracking-[0.25em] text-text-muted;
+  }
+  .text-gradient {
+    background: linear-gradient(120deg, #ffffff 0%, var(--color-accent-soft) 60%, var(--color-accent-main) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-gold {
+    background: linear-gradient(120deg, #fff7e0 0%, var(--color-gold-soft) 50%, var(--color-gold) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .divider {
+    @apply border-b border-border-subtle;
+  }
 }

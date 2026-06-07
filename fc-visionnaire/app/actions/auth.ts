@@ -5,7 +5,10 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-export async function registerUser(formData: FormData) {
+export async function registerUser(
+  _prev: { error?: string } | null,
+  formData: FormData,
+) {
   const username = formData.get("username") as string;
   const password = formData.get("password") as string;
 
@@ -31,18 +34,33 @@ export async function registerUser(formData: FormData) {
     .select("id")
     .single();
 
-  if (error || !newUser)
-    return { error: "Erreur lors de la création du compte." };
+  if (error || !newUser) {
+    console.error("[registerUser]", error?.message ?? "insert failed");
+    return {
+      error:
+        error?.message?.includes("row-level security")
+          ? "Accès base de données bloqué (RLS). Exécute supabase/fix-rls.sql."
+          : "Erreur lors de la création du compte.",
+    };
+  }
 
   // 4. Connecter l'utilisateur (NOUVELLE SYNTAXE NEXT.JS)
   const cookieStore = await cookies();
-  cookieStore.set("user_id", newUser.id, { httpOnly: true, secure: true });
+  cookieStore.set("user_id", newUser.id, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
 
   // 5. Redirection vers le dashboard
   redirect("/dashboard");
 }
 
-export async function loginUser(formData: FormData) {
+export async function loginUser(
+  _prev: { error?: string } | null,
+  formData: FormData,
+) {
   const username = formData.get("username") as string;
   const password = formData.get("password") as string;
 
@@ -63,7 +81,12 @@ export async function loginUser(formData: FormData) {
 
   // 3. Connecter l'utilisateur (NOUVELLE SYNTAXE NEXT.JS)
   const cookieStore = await cookies();
-  cookieStore.set("user_id", user.id, { httpOnly: true, secure: true });
+  cookieStore.set("user_id", user.id, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
 
   redirect("/dashboard");
 }
